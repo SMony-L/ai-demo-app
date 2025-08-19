@@ -17,12 +17,12 @@ def health():
         "status": "healthy",
         "message": "Service is running"
     }), 200
-
+# TODO: implement greet endpoint default to Developer
 @main_bp.route('/greet')
 def greet():
     """Greet endpoint that takes a name parameter and returns a personalized greeting."""
-    name = request.args.get('name', 'World')
+    name = request.args.get('name', 'Developer')
     return jsonify({
         "message": f"Hello, {name}!",
         "status": "success"
-    })
+    }), 200
