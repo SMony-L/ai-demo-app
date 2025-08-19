@@ -34,13 +34,13 @@ def test_greet_endpoint_with_name(client):
     assert data['message'] == 'Hello, Alice!'
     assert data['status'] == 'success'
 
-def test_greet_endpoint_without_name(client):
-    """Test the greet endpoint without a name parameter (should default to 'World')."""
+def test_greet_defaults_to_world(client):
+    """Test the greet endpoint defaults to 'World' when no name is provided."""
     response = client.get('/greet')
     assert response.status_code == 200
     data = response.get_json()
     assert data['message'] == 'Hello, World!'
-    assert data['status'] == 'success'
+    assert data['status'] == 'success'        
 
 def test_greet_endpoint_with_empty_name(client):
     """Test the greet endpoint with an empty name parameter."""
@@ -56,4 +56,4 @@ def test_greet_endpoint_with_special_characters(client):
     assert response.status_code == 200
     data = response.get_json()
     assert data['message'] == 'Hello, John Doe!'
-    assert data['status'] == 'success'
+    assert data['status'] == 'success'                
