@@ -2,22 +2,34 @@
 Checkout module for handling cart and payment operations.
 """
 from flask import Blueprint, jsonify, request
-from datetime import datetime
+from datetime import datetime, timezone
 import uuid
 import secrets
 
 checkout_bp = Blueprint('checkout', __name__)
 
 # In-memory storage for demonstration (in production, use a database)
+# NOTE: This is for demo purposes only. In production:
+# - Use a proper database with session management
+# - Implement data isolation and security measures
+# - Add authentication and authorization
 carts = {}
 checkout_sessions = {}
 payment_transactions = {}
+
+# Constants for validation
+MIN_CARD_LENGTH = 13
+MAX_CARD_LENGTH = 19
+MIN_CVV_LENGTH = 3
+MAX_CVV_LENGTH = 4
+MAX_FUTURE_YEARS = 20  # Maximum years in the future for expiry date
+MOCK_SUCCESS_RATE = 0.9  # 90% success rate for demo payments
 
 # Mock payment gateway configuration
 PAYMENT_GATEWAY_CONFIG = {
     'test_mode': True,
     'supported_currencies': ['USD', 'EUR', 'GBP'],
-    'mock_success_rate': 0.9  # 90% success rate for demo
+    'mock_success_rate': MOCK_SUCCESS_RATE
 }
 
 
@@ -29,7 +41,7 @@ class CartItem:
         self.name = name
         self.price = price
         self.quantity = quantity
-        self.added_at = datetime.utcnow().isoformat()
+        self.added_at = datetime.now(timezone.utc).isoformat()
     
     def to_dict(self):
         return {
@@ -48,26 +60,26 @@ class Cart:
     def __init__(self, cart_id):
         self.cart_id = cart_id
         self.items = []
-        self.created_at = datetime.utcnow().isoformat()
-        self.updated_at = datetime.utcnow().isoformat()
+        self.created_at = datetime.now(timezone.utc).isoformat()
+        self.updated_at = datetime.now(timezone.utc).isoformat()
     
     def add_item(self, item_id, name, price, quantity=1):
         """Add an item to the cart or update quantity if it already exists."""
         for item in self.items:
             if item.item_id == item_id:
                 item.quantity += quantity
-                self.updated_at = datetime.utcnow().isoformat()
+                self.updated_at = datetime.now(timezone.utc).isoformat()
                 return item
         
         new_item = CartItem(item_id, name, price, quantity)
         self.items.append(new_item)
-        self.updated_at = datetime.utcnow().isoformat()
+        self.updated_at = datetime.now(timezone.utc).isoformat()
         return new_item
     
     def remove_item(self, item_id):
         """Remove an item from the cart."""
         self.items = [item for item in self.items if item.item_id != item_id]
-        self.updated_at = datetime.utcnow().isoformat()
+        self.updated_at = datetime.now(timezone.utc).isoformat()
     
     def get_total(self):
         """Calculate the total price of items in the cart."""
@@ -95,8 +107,8 @@ class CheckoutSession:
         self.session_id = session_id
         self.cart_id = cart_id
         self.status = 'pending'  # pending, completed, failed, expired
-        self.created_at = datetime.utcnow().isoformat()
-        self.updated_at = datetime.utcnow().isoformat()
+        self.created_at = datetime.now(timezone.utc).isoformat()
+        self.updated_at = datetime.now(timezone.utc).isoformat()
         self.payment_details = None
         self.transaction_id = None
     
@@ -123,7 +135,22 @@ def get_or_create_cart(cart_id=None):
 
 
 def validate_payment_details(payment_details):
-    """Validate payment details (mock validation)."""
+    """
+    Validate payment details for processing.
+    
+    Args:
+        payment_details (dict): Dictionary containing payment information with keys:
+            - card_number: Credit card number (13-19 digits)
+            - cvv: Card verification value (3-4 digits)
+            - expiry_month: Expiration month (1-12)
+            - expiry_year: Expiration year (current year or later)
+            - cardholder_name: Name on the card
+    
+    Returns:
+        tuple: (is_valid, error_message)
+            - is_valid (bool): True if validation passes, False otherwise
+            - error_message (str or None): Error description if validation fails
+    """
     required_fields = ['card_number', 'cvv', 'expiry_month', 'expiry_year', 'cardholder_name']
     
     for field in required_fields:
@@ -132,11 +159,11 @@ def validate_payment_details(payment_details):
     
     # Basic validation for demo purposes
     card_number = str(payment_details['card_number']).replace(' ', '')
-    if not card_number.isdigit() or len(card_number) < 13 or len(card_number) > 19:
+    if not card_number.isdigit() or len(card_number) < MIN_CARD_LENGTH or len(card_number) > MAX_CARD_LENGTH:
         return False, "Invalid card number format"
     
     cvv = str(payment_details['cvv'])
-    if not cvv.isdigit() or len(cvv) not in [3, 4]:
+    if not cvv.isdigit() or len(cvv) not in [MIN_CVV_LENGTH, MAX_CVV_LENGTH]:
         return False, "Invalid CVV format"
     
     try:
@@ -146,8 +173,8 @@ def validate_payment_details(payment_details):
         if not (1 <= expiry_month <= 12):
             return False, "Invalid expiry month"
         
-        current_year = datetime.utcnow().year
-        current_month = datetime.utcnow().month
+        current_year = datetime.now(timezone.utc).year
+        current_month = datetime.now(timezone.utc).month
         
         # Check if card is expired
         if expiry_year < current_year:
@@ -157,7 +184,7 @@ def validate_payment_details(payment_details):
             return False, "Card has expired"
         
         # Check if expiry year is too far in the future
-        if expiry_year > current_year + 20:
+        if expiry_year > current_year + MAX_FUTURE_YEARS:
             return False, "Invalid expiry year"
     except (ValueError, TypeError):
         return False, "Invalid expiry date format"
@@ -166,7 +193,29 @@ def validate_payment_details(payment_details):
 
 
 def process_payment_mock(amount, payment_details, currency='USD'):
-    """Mock payment processing (simulates payment gateway)."""
+    """
+    Mock payment processing (simulates payment gateway).
+    
+    This is a demonstration function that simulates payment processing.
+    In production, this would integrate with a real payment gateway like Stripe or PayPal.
+    
+    Args:
+        amount (float): Payment amount
+        payment_details (dict): Payment information (card number, CVV, expiry, etc.)
+        currency (str): Currency code (USD, EUR, GBP, etc.)
+    
+    Returns:
+        dict: Payment result with keys:
+            - success (bool): Whether payment was successful
+            - transaction_id (str or None): Transaction ID if successful
+            - message (str): Success message (if successful)
+            - error (str): Error message (if failed)
+    
+    Test Cards:
+        - 4242424242424242: Always succeeds
+        - 4000000000000xxx: Always fails (where xxx starts with 0)
+        - Other cards: 90% success rate based on last digit
+    """
     # Validate payment details
     is_valid, error_message = validate_payment_details(payment_details)
     if not is_valid:
@@ -194,8 +243,10 @@ def process_payment_mock(amount, payment_details, currency='USD'):
     elif card_number.startswith('4000000000000'):  # Failure test cards
         success = False
     else:
-        # Use a deterministic approach based on card number
-        success = int(card_number[-1]) % 10 >= 1  # 90% success rate
+        # Use a deterministic approach based on last digit
+        # Digits 1-9 succeed (90% success rate), only 0 fails
+        last_digit = int(card_number[-1])
+        success = last_digit >= 1
     
     if success:
         transaction_id = f"txn_{uuid.uuid4().hex[:16]}"
@@ -203,7 +254,7 @@ def process_payment_mock(amount, payment_details, currency='USD'):
             'amount': amount,
             'currency': currency,
             'status': 'completed',
-            'timestamp': datetime.utcnow().isoformat(),
+            'timestamp': datetime.now(timezone.utc).isoformat(),
             'card_last4': card_number[-4:]
         }
         return {
@@ -401,7 +452,7 @@ def process_payment():
     if payment_result['success']:
         session.status = 'completed'
         session.transaction_id = payment_result['transaction_id']
-        session.updated_at = datetime.utcnow().isoformat()
+        session.updated_at = datetime.now(timezone.utc).isoformat()
         
         return jsonify({
             'status': 'success',
@@ -412,7 +463,7 @@ def process_payment():
         }), 200
     else:
         session.status = 'failed'
-        session.updated_at = datetime.utcnow().isoformat()
+        session.updated_at = datetime.now(timezone.utc).isoformat()
         
         return jsonify({
             'status': 'error',
